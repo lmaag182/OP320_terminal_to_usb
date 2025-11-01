@@ -5,12 +5,12 @@ import time
 # --- Modbus RTU configuration ---
 # You might need to change the slave address.
 SLAVE_ADDRESS = 1
-PORT = '/dev/ttyUSB1'
+PORT = '/dev/ttyUSB0'
 
 # --- Values to read ---
 # 4x registers are holding registers.
 # Let's try reading from register 1.
-REGISTER_ADDRESS = 2
+REGISTER_ADDRESS = 7
 
 # Initialize Modbus instrument
 instrument = minimalmodbus.Instrument(PORT, SLAVE_ADDRESS)
