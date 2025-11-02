@@ -7,7 +7,7 @@ import json
 
 # ------------------- CONFIG -------------------
 SLAVES         = [1, 17]
-PORT           = '/dev/ttyUSB1'
+PORT           = '/dev/ttyUSB0'
 BAUDRATE       = 9600
 REGISTER_START = 0
 REGISTER_COUNT = 8
