@@ -6,8 +6,8 @@ import json
 
 # --- Modbus RTU configuration ---
 # You might need to change the slave address.
-SLAVE_ADDRESS = 1
-PORT = '/dev/ttyUSB0'
+SLAVE_ADDRESS = 17
+PORT = '/dev/ttyUSB1'
 
 # --- Values to read ---
 # 4x registers are holding registers.
