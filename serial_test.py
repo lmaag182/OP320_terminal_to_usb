@@ -1,88 +1,70 @@
+#!/usr/bin/env python3
 import minimalmodbus
 import serial
 import time
 import paho.mqtt.client as mqtt
 import json
 
-# --- Modbus RTU configuration ---
-# You might need to change the slave address.
-SLAVE_ADDRESS = 17
-PORT = '/dev/ttyUSB1'
-
-# --- Values to read ---
-# 4x registers are holding registers.
-# Let's try reading from register 1.
+# ------------------- CONFIG -------------------
+SLAVES         = [1, 17]
+PORT           = '/dev/ttyUSB1'
+BAUDRATE       = 9600
 REGISTER_START = 0
 REGISTER_COUNT = 8
-SCAN_INTERVAL = 1  # seconds
+SCAN_INTERVAL  = 1.0
 
-# --- MQTT Configuration ---
-MQTT_BROKER = "192.168.50.75"
-MQTT_PORT = 1883
-MQTT_TOPIC_BASE = "wp3082adam/registers"
+MQTT_BROKER    = "192.168.50.75"
+MQTT_PORT      = 1883
+MQTT_BASE      = "wp3082adam/registers"
+# ---------------------------------------------
 
-# Initialize Modbus instrument
-instrument = minimalmodbus.Instrument(PORT, SLAVE_ADDRESS)
-instrument.debug = False  # Set to True for debugging
+# One instrument → we just change .address before every call
+instr = minimalmodbus.Instrument(PORT, 1)  # dummy address
+instr.serial.baudrate = BAUDRATE
+instr.serial.bytesize = 8
+instr.serial.parity   = serial.PARITY_NONE
+instr.serial.stopbits = serial.STOPBITS_ONE
+instr.serial.timeout  = 0.3   # short but safe
+instr.mode = minimalmodbus.MODE_RTU
+instr.debug = False
+instr.clear_buffers_before_each_transaction = True
 
-# Configure serial port settings
-instrument.serial.baudrate = 9600
-instrument.serial.bytesize = 8
-instrument.serial.parity = serial.PARITY_NONE
-instrument.serial.stopbits = serial.STOPBITS_ONE
-instrument.serial.timeout = 1
-instrument.mode = minimalmodbus.MODE_RTU
+# MQTT
+client = mqtt.Client(client_id="modbus_bridge")
+client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
+client.loop_start()
+time.sleep(0.5)
 
-# Initialize MQTT client
-client = mqtt.Client()
-
-def connect_mqtt():
-    try:
-        client.connect(MQTT_BROKER, MQTT_PORT)
-        client.loop_start()
-        print(f"Connected to MQTT broker at {MQTT_BROKER}:{MQTT_PORT}")
-    except Exception as e:
-        print(f"Failed to connect to MQTT broker: {e}")
-        exit(1)
-
-def read_and_publish():
+def read_slave(sid: int) -> dict:
+    instr.address = sid
     data = {}
     try:
-        for i in range(REGISTER_COUNT):
-            register_address = REGISTER_START + i
-            try:
-                value = instrument.read_register(
-                    registeraddress=register_address,
-                    functioncode=3
-                )
-                data[f"register_{register_address}"] = value
-                # Publish individual register value
-                client.publish(f"{MQTT_TOPIC_BASE}/{register_address}", value)
-            except Exception as e:
-                print(f"Error reading register {register_address}: {e}")
-                data[f"register_{register_address}"] = None
-
-        # Publish all values as JSON
-        client.publish(f"{MQTT_TOPIC_BASE}/all", json.dumps(data))
-        print(f"Published data: {data}")
-
+        # ONE single request for 8 registers → fastest + least bus load
+        regs = instr.read_registers(REGISTER_START, REGISTER_COUNT, functioncode=3)
+        for i, v in enumerate(regs):
+            data[f"register_{REGISTER_START + i}"] = float(v)
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"Slave {sid} → {e}")
+        for i in range(REGISTER_COUNT):
+            data[f"register_{REGISTER_START + i}"] = None
+    return data
 
-def main():
-    print("Starting Modbus to MQTT bridge...")
-    connect_mqtt()
-    
-    try:
-        while True:
-            read_and_publish()
-            time.sleep(SCAN_INTERVAL)
-    except KeyboardInterrupt:
-        print("\nStopping...")
-    finally:
-        client.loop_stop()
-        client.disconnect()
-        print("Script finished.")
+def publish(sid: int, data: dict):
+    base = f"{MQTT_BASE}/slave{sid}"
+    for k, v in data.items():
+        client.publish(f"{base}/{k}", payload=str(v) if v is not None else "null")
+    client.publish(f"{base}/all", json.dumps(data))
 
-if __name__ == "__main__":
-    main()
+# ------------------- MAIN -------------------
+print("Modbus → MQTT bridge STARTED – slaves 1 + 17")
+while True:
+    start = time.time()
+
+    # ---- ONE request per slave, back-to-back ----
+    for sid in SLAVES:
+        values = read_slave(sid)
+        publish(sid, values)
+
+    # ---- sleep the remainder of the second ----
+    elapsed = time.time() - start
+    time.sleep(max(0.01, SCAN_INTERVAL - elapsed))
